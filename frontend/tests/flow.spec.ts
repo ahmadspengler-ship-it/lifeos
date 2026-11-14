@@ -27,9 +27,9 @@ test('mobile registration → meal → advisor → cookie restore → login data
   await page.getByLabel('克数', {exact:true}).fill('180');
   await page.getByRole('button', {name:'确认并保存记录'}).click();
   await expect(page.getByRole('status').filter({hasText:'已保存到你的饮食记录'})).toBeVisible();
-  await page.getByRole('button', {name:'下一餐灵感',exact:true}).click();
-  await page.getByRole('button', {name:'生成下一餐建议'}).click();
-  await expect(page.getByRole('heading', {name:'青蔬鸡肉糙米碗'})).toBeVisible();
+  await page.getByRole('button', {name:'怎么做菜',exact:true}).click();
+  await page.getByRole('button', {name:'给我一份做法'}).click();
+  await expect(page.getByRole('button', {name:'记录这餐'}).first()).toBeVisible();
   await page.getByRole('button', {name:'打开AI顾问'}).click();
   await page.getByLabel('顾问问题').fill('下一餐蔬菜怎么选');
   await page.getByRole('button', {name:'发送问题'}).click();

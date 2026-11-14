@@ -12,9 +12,10 @@ from .auth import router as auth_router, user
 from .catalog import router as catalog_router, catalog_map, estimate
 from .media import router as media_router, owned_image, image_url
 from .advisor import router as advisor_router, resolve_conversation
-from .schemas import Auth, Consent, Food, MealRequest, Metric, Chat, Answer, Feedback
+from .schemas import Auth, Consent, Food, MealRequest, Metric, Chat, Answer, Feedback, RecipeRequest
 from .agents import FOODS, SOURCE, nutrition, search, safety, review_answer, NutritionPlannerAgent, HealthInsightAgent
 from .llm import OpenAICompatibleProvider, FoodVisionAgent, ProviderUnavailable, plan_tools, stream_answer
+from .recipes import recommend as recommend_recipes, match_recipes
 
 @asynccontextmanager
 async def lifespan(app):
@@ -64,16 +65,11 @@ def remove(record_id:str,u=Depends(user),s=Depends(db)):
     r=s.get(Record,record_id)
     if not r or r.user_id!=u.id: raise HTTPException(404,'记录不存在')
     s.delete(r);s.commit();return {'ok':True}
-@app.post(P+'/meals/recommend')
-def recommend(body:MealRequest,u=Depends(user),s=Depends(db)):
-    return {'meals':NutritionPlannerAgent().run(body,records(s,u,'feedback'),records(s,u,'food')[-7:] if u.consents.get('diet') else None),'mode':'rules','note':'价格为演示估计；尚未根据个人疾病或医疗目标定制'}
-@app.post(P+'/meals/mystery-box')
-def mystery(body:MealRequest,u=Depends(user),s=Depends(db)):
-    meals=NutritionPlannerAgent().run(body,records(s,u,'feedback'),records(s,u,'food')[-7:] if u.consents.get('diet') else None)
-    past=records(s,u,'mystery')
-    if len(meals)>1 and past and meals[0]['id']==past[-1]['meal_id']: meals=meals[1:]+meals[:1]
-    if meals: put(s,u,'mystery',{'meal_id':meals[0]['id']})
-    return {'meal':meals[0] if meals else None,'mode':'rules'}
+@app.post(P+'/recipes/recommend')
+async def recipe_recommend(body:RecipeRequest,u=Depends(user),s=Depends(db)):
+    live=bool(u.consents.get('external_ai') and os.getenv('LLM_API_KEY'))
+    names=[v['name'] for v in catalog_map(s,u).values()]
+    return await recommend_recipes(body,names,live)
 @app.post(P+'/meals/feedback')
 def feedback(body:Feedback,u=Depends(user),s=Depends(db)): return put(s,u,'feedback',body.model_dump())
 @app.get(P+'/health/metrics')
@@ -121,7 +117,7 @@ class AdvisorOrchestrator:
             yield {'type':'answer',**result}
             return
         yield {'type':'step','name':'权限检查完成'}
-        allowed=['nutrition_search','meal_plan','mystery_box']
+        allowed=['nutrition_search','meal_plan','recipe_ideas']
         if u.consents.get('diet'): allowed.append('food_log')
         if u.consents.get('health'): allowed.append('health_trends')
         selected=['nutrition_search']+[n for n in ('food_log','health_trends') if n in allowed]
@@ -141,10 +137,12 @@ class AdvisorOrchestrator:
                 require(u,'health');context[name]=HealthInsightAgent().run(records(s,u,'metric')[-100:])
             elif name=='nutrition_search':
                 docs=search(body.message);context[name]=docs
+            elif name=='recipe_ideas':
+                ideas=match_recipes(RecipeRequest())
+                context[name]={'mode':'local-library','recipes':[{'name':r['name'],'minutes':r['minutes'],'steps':[step['title'] for step in r['steps']]} for r in ideas]}
             else:
-                req=MealRequest(mode='surprise' if name=='mystery_box' else 'healthy')
-                candidates=NutritionPlannerAgent().run(req,records(s,u,'feedback') if u.consents.get('diet') else [])
-                context[name]={'assumptions':'默认预算30元；尚未提供过敏原，食用前必须核实', 'meals':candidates[:1] if name=='mystery_box' else candidates}
+                candidates=NutritionPlannerAgent().run(MealRequest(),records(s,u,'feedback') if u.consents.get('diet') else [])
+                context[name]={'assumptions':'默认预算30元；尚未提供过敏原，食用前必须核实', 'meals':candidates}
             yield {'type':'step','name':'已执行工具：'+name}
         revisions=records(s,u,'consent');revision=revisions[-1]['id'] if revisions else 'initial'
         history=[{'question':r['question'],'answer':r['text']} for r in records(s,u,'chat') if r.get('consent_revision')==revision and r.get('conversation_id')==body.conversation_id and r['id']!=body.regenerate_id][-6:]

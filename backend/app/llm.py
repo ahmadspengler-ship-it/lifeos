@@ -48,7 +48,7 @@ async def plan_tools(provider, question, allowed):
     """One bounded standard Function Calling planning request; tools are read-only."""
     key=os.getenv('LLM_API_KEY','')
     if not key: raise ProviderUnavailable('未配置模型')
-    descriptions={'food_log':'读取最近饮食记录，需要饮食授权','nutrition_search':'检索有引用的饮食知识','health_trends':'读取身体指标趋势，需要健康授权','meal_plan':'生成默认预算内的下一餐候选','mystery_box':'生成随机餐食灵感'}
+    descriptions={'food_log':'读取最近饮食记录，需要饮食授权','nutrition_search':'检索有引用的饮食知识','health_trends':'读取身体指标趋势，需要健康授权','meal_plan':'生成默认预算内的下一餐候选','recipe_ideas':'用本地菜谱库给出可做菜谱与步骤'}
     tool_defs=[{'type':'function','function':{'name':name,'description':descriptions[name],'parameters':{'type':'object','properties':{},'additionalProperties':False}}} for name in allowed]
     try:
         async with httpx.AsyncClient(timeout=15) as client:
