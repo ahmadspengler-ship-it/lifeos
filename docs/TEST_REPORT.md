@@ -27,3 +27,11 @@ Linux；独立 Python 3.12 虚拟环境；Next.js 15.5.29；React 19.3.1；pnpm 
 - 新增 `/api/v1/recipes/recommend` 与 6 道内置本地菜谱库，支持食材、口味、时间、份数与忌口过滤；模型密钥 + 外部 AI 授权时首选菜谱由模型生成，经 JSON Schema 与安全复核，失败降级并标注来源。
 - 本地验证：后端 pytest 74 项全部通过（规则模式、忌口过滤、未知忌口提示、mock 模型的来源标注）；前端 `tsc --noEmit` 通过；临时关闭 `output: 'standalone'` 后 Next.js 生产构建通过（编译、类型检查、5 个静态页面），配置已原样恢复。
 - 未执行与边界：保持 `output: 'standalone'` 时，Windows 复制 standalone 依赖需创建符号链接，本机 EPERM 权限不足导致构建最后一步失败；这与 2026-11-11 记录的环境限制一致，需管理员权限或开启开发者模式后重跑完整构建。Playwright E2E runner 本次未运行，仅更新了脚本流程。无真实模型密钥，真实模型生成的菜谱步骤未验证；调味料与另备食材未计入营养估计；未识别的忌口只提示自行核实，不保证交叉接触安全；本节为本次改动记录，不改写 2026-11-11 的历史实测结论。
+
+## 2026-11-15 增量改动：「怎么做菜」改为纯模型生成
+- 移除 `recipes.py` 中的 6 道本地菜谱常量、确定性匹配、忌口内置清单及顾问工具 `recipe_ideas`（该工具原本读取本地菜谱库）。新增 `RecipePlan`（1–3 道菜）与 `RecipeAnswer.items`，由模型一次性生成菜名、用料、分步做法与每步火候。
+- 服务端约束：把用户食物目录的 id/name 传给模型用于落在库内的食材关联，返回的 `food_id` 只保留目录中存在的项；经 JSON Schema 校验与 `review_answer` 安全复核；忌口提示明确「由模型排除、服务端无法核实别名与交叉接触风险」。
+- 无模型时的口径：未配置 `LLM_API_KEY` / 未授权 `external_ai` / 模型失败 / 输出被复核拦截，`POST /api/v1/recipes/recommend` 一律返回 503 并给出中文说明，不再降级到本地菜谱，也不把规则输出称为 AI 生成。
+- 本地验证：后端 pytest 74 passed（无密钥不可用、mock 模型成功生成并过滤编造 id、mock 模型失败）；前端 `tsc --noEmit` 通过；Next.js 生产构建的「编译成功 + 类型检查」阶段已通过（首次运行显示 `Compiled successfully`），并修复了由此发现的 ESLint 未使用变量 `recipeMode`。
+- 完整构建未跑完（环境限制）：随后本机写 `.next/trace` 持续报 EPERM，换临时 `distDir`、提权运行、预创建空 trace 文件均无效；这与代码无关，也不同于下面 standalone 的符号链接问题。配置 `next.config.ts` 每次都已原样还原，构建产物已移出工作区。
+- 未执行与边界：**本次按用户要求只改代码、不接真实模型**，真实供应商下的生成质量、耗时、Schema 兼容性与安全复核效果均未验证；mock 契约测试只覆盖链路与来源标注，不能当作真实模型成功。Playwright E2E runner 未运行；保持 `output: 'standalone'` 时 Windows 符号链接 EPERM 仍会导致构建最后一步失败（历史记录一致）。本节不改写 2026-11-11 与 2026-11-14 的历史实测结论。

@@ -122,3 +122,7 @@ class RecipeAnswer(Strict):
     steps: list[RecipeStep] = Field(min_length=2, max_length=12)
     heat_tips: str = Field(default='', max_length=400)
     note: str = Field(default='', max_length=400)
+    items: list[FoodItem] = Field(default_factory=list, max_length=20)
+
+class RecipePlan(Strict):
+    recipes: list[RecipeAnswer] = Field(min_length=1, max_length=3)

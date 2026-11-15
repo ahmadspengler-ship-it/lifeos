@@ -15,7 +15,7 @@ from .advisor import router as advisor_router, resolve_conversation
 from .schemas import Auth, Consent, Food, MealRequest, Metric, Chat, Answer, Feedback, RecipeRequest
 from .agents import FOODS, SOURCE, nutrition, search, safety, review_answer, NutritionPlannerAgent, HealthInsightAgent
 from .llm import OpenAICompatibleProvider, FoodVisionAgent, ProviderUnavailable, plan_tools, stream_answer
-from .recipes import recommend as recommend_recipes, match_recipes
+from .recipes import recommend as recommend_recipes
 
 @asynccontextmanager
 async def lifespan(app):
@@ -67,9 +67,13 @@ def remove(record_id:str,u=Depends(user),s=Depends(db)):
     s.delete(r);s.commit();return {'ok':True}
 @app.post(P+'/recipes/recommend')
 async def recipe_recommend(body:RecipeRequest,u=Depends(user),s=Depends(db)):
-    live=bool(u.consents.get('external_ai') and os.getenv('LLM_API_KEY'))
-    names=[v['name'] for v in catalog_map(s,u).values()]
-    return await recommend_recipes(body,names,live)
+    if not (u.consents.get('external_ai') and os.getenv('LLM_API_KEY')):
+        raise HTTPException(503,'未连接 AI 模型：需要部署者配置 LLM_API_KEY 等环境变量，并在「数据与隐私」开启「外部 AI 处理」。此功能不提供本地菜谱兜底。')
+    catalog={k:v['name'] for k,v in catalog_map(s,u).items()}
+    try:
+        return await recommend_recipes(body,catalog)
+    except ProviderUnavailable:
+        raise HTTPException(503,'AI 模型不可用或生成结果未通过结构校验与安全复核，请稍后重试。') from None
 @app.post(P+'/meals/feedback')
 def feedback(body:Feedback,u=Depends(user),s=Depends(db)): return put(s,u,'feedback',body.model_dump())
 @app.get(P+'/health/metrics')
@@ -117,7 +121,7 @@ class AdvisorOrchestrator:
             yield {'type':'answer',**result}
             return
         yield {'type':'step','name':'权限检查完成'}
-        allowed=['nutrition_search','meal_plan','recipe_ideas']
+        allowed=['nutrition_search','meal_plan']
         if u.consents.get('diet'): allowed.append('food_log')
         if u.consents.get('health'): allowed.append('health_trends')
         selected=['nutrition_search']+[n for n in ('food_log','health_trends') if n in allowed]
@@ -137,9 +141,6 @@ class AdvisorOrchestrator:
                 require(u,'health');context[name]=HealthInsightAgent().run(records(s,u,'metric')[-100:])
             elif name=='nutrition_search':
                 docs=search(body.message);context[name]=docs
-            elif name=='recipe_ideas':
-                ideas=match_recipes(RecipeRequest())
-                context[name]={'mode':'local-library','recipes':[{'name':r['name'],'minutes':r['minutes'],'steps':[step['title'] for step in r['steps']]} for r in ideas]}
             else:
                 candidates=NutritionPlannerAgent().run(MealRequest(),records(s,u,'feedback') if u.consents.get('diet') else [])
                 context[name]={'assumptions':'默认预算30元；尚未提供过敏原，食用前必须核实', 'meals':candidates}
